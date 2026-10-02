@@ -80,6 +80,7 @@
 
         <div class="filter-section">
             <h3>语料分类</h3>
+            <div style="font-size:.72rem;color:var(--muted);margin:-.4rem 0 .5rem">默认不勾选，勾哪个显示哪个</div>
             <div id="categoryList"></div>
         </div>
 
@@ -124,7 +125,7 @@ const FALLBACK_CODES = { english: 'en', japanese: 'ja', german: 'de', french: 'f
 
 let allVoices = [];
 let filtered = [];
-// 一级分类勾选：空集合=全部；selectedSub: 一级 -> 二级集合（空 Set=该一级下全选，非空=只看这些二级）
+// 一级分类勾选：空集合=一个都不显示（默认全部不勾，勾哪个显示哪个）；selectedSub: 一级 -> 二级集合（空 Set=该一级下全选，非空=只看这些二级）
 let selectedCats = new Set();
 let selectedSub = new Map();
 let expandedCats = new Set();
@@ -252,7 +253,8 @@ function renderCategoryTree() {
         if (isOpen) {
             const subs = Object.entries(info.subs).sort((a, b) => b[1] - a[1]);
             html += '<div class="sub-list">' + subs.map(([s, n]) => {
-                const subChecked = !partial || set.has(s);
+                // 一级未选：所有二级一律不勾；一级全选（set 为空）：全勾；部分选中（set 非空）：只勾集合内的
+                const subChecked = checked && (!set || set.size === 0 || set.has(s));
                 return `<label class="cat-item sub-item"><input type="checkbox" data-cat="${esc(c)}" data-sub="${esc(s)}" ${subChecked ? 'checked' : ''}> ${esc(s)}<span class="cnt">${n}</span></label>`;
             }).join('') + '</div>';
         }
@@ -274,23 +276,30 @@ function toggleTopCat(c, on) {
 
 function toggleSubCat(c, s, on) {
     const allSubs = Object.keys(catTree[c].subs);
-    let set = selectedSub.get(c) || new Set();
+    let set = selectedSub.get(c);
     if (on) {
+        // 一级未选时直接点二级：等价于只勾这一个二级
+        if (!selectedCats.has(c)) {
+            selectedCats.add(c);
+            selectedSub.set(c, new Set([s]));
+            return;
+        }
+        if (!set || set.size === 0) return; // 已是全选，无需处理
         set.add(s);
-        selectedCats.add(c);
-        if (set.size >= allSubs.length) set = new Set();
-        selectedSub.set(c, set);
+        // 二级勾满时归一为全选（空 Set）
+        if (set.size >= allSubs.length) selectedSub.set(c, new Set());
     } else {
+        if (!selectedCats.has(c)) return;
         // 全选模式下取消一个：先展开为“全有”集合再移除
-        if (selectedCats.has(c) && set.size === 0) set = new Set(allSubs);
+        if (!set || set.size === 0) set = new Set(allSubs);
         set.delete(s);
-        selectedSub.set(c, set);
         if (set.size === 0) { selectedCats.delete(c); selectedSub.delete(c); }
+        else selectedSub.set(c, set);
     }
 }
 
 function catMatch(d) {
-    if (!selectedCats.size) return true;
+    if (!selectedCats.size) return false; // 默认全部不勾 -> 一条都不显示
     const c = d.c || '其他';
     if (!selectedCats.has(c)) return false;
     const set = selectedSub.get(c);
@@ -323,7 +332,7 @@ function render() {
     const showZ = mode !== 'foreign';
     const fCode = langCode(settings.lang);
 
-    document.getElementById('results').innerHTML = slice.map((d, i) => {
+    let html = slice.map((d, i) => {
         const ft = foreignText(d);
         const zt = nativeText(d);
         let body = '';
@@ -348,6 +357,8 @@ function render() {
                 ${body}
             </div>`;
     }).join('');
+    if (!filtered.length) html = '<div style="text-align:center;color:#64748b;padding:5rem 1rem;line-height:2.2">请在左侧「语料分类」勾选要浏览的分类<br>默认不勾选任何分类，勾哪个显示哪个</div>';
+    document.getElementById('results').innerHTML = html;
 
     const totalPages = Math.ceil(filtered.length / pageSize) || 1;
     document.getElementById('pageInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
